@@ -7,6 +7,9 @@ from pydantic import BaseModel, HttpUrl
 from typing import List, Optional
 from dotenv import load_dotenv
 
+from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
+
+
 # LangChain and Pinecone
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
@@ -39,67 +42,158 @@ class RAGResponse(BaseModel):
     answers: List[str]
 
 # --- Core Processing Logic ---
+# def setup_vector_store_and_rag_chain(document_url: str):
+#     """Downloads, chunks, embeds, and indexes a document, then returns the RAG chain."""
+#     local_pdf_path = "temp_document.pdf"
+#     try:
+#         # 1. Download and chunk the document
+#         print(f"Downloading document from {document_url}")
+#         doc_response = requests.get(str(document_url))
+#         doc_response.raise_for_status()
+#         with open(local_pdf_path, 'wb') as f:
+#             f.write(doc_response.content)
+        
+#         print(f"📄 Loading document from: {local_pdf_path}")
+#         loader = PyPDFLoader(local_pdf_path)
+#         documents = loader.load()
+#         splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=400, length_function=len)
+#         chunks = splitter.split_documents(documents)
+#         print(f"✅ Split into {len(chunks)} chunks.")
+
+#         # 2. Initialize Pinecone and clear index
+#         print("\n🚀 Initializing Pinecone...")
+#         pc = Pinecone(api_key=PINECONE_API_KEY)
+#         if PINECONE_INDEX_NAME in pc.list_indexes().names():
+#             print(f"🧹 Clearing existing index: {PINECONE_INDEX_NAME}...")
+#             pc.Index(PINECONE_INDEX_NAME).delete(delete_all=True)
+#         else:
+#             print(f"📦 Creating index: {PINECONE_INDEX_NAME}")
+#             pc.create_index(name=PINECONE_INDEX_NAME, dimension=768, metric="cosine", spec=PodSpec(environment=PINECONE_ENV, pod_type="p1.x1"))
+#             time.sleep(10)
+
+#         # 3. Use the most accurate embedding model
+#         embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=GOOGLE_API_KEY)
+        
+#         # 4. Create and populate the vector store
+#         print(f"➕ Embedding and adding {len(chunks)} chunks to Pinecone...")
+#         vector_store = PineconeVectorStore.from_documents(documents=chunks, embedding=embeddings, index_name=PINECONE_INDEX_NAME)
+#         print("✅ Documents embedded and indexed.")
+
+#         # --- THE FIX IS HERE ---
+#         # Add a short delay to allow the Pinecone index to become fully consistent
+#         print("⏱️ Waiting for index to stabilize...")
+#         time.sleep(5) 
+        
+#         # 5. Set up the retriever
+#         retriever = vector_store.as_retriever(search_kwargs={"k": 5})
+#         print(f"🔍 Retriever initialized.")
+
+#         # 6. Set up the LLM and RAG chain
+#         llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.3, google_api_key=GOOGLE_API_KEY)
+#         prompt = ChatPromptTemplate.from_template("""You are a precise, fact-based Question-Answering bot. Your answers must be **concise and directly extracted** from the provided context. 
+# Do not add any introductory or concluding conversational phrases.
+# Context: {context}
+# Question: {question}
+# Answer:""")
+#         rag_chain = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever, chain_type_kwargs={"prompt": prompt})
+#         print("✅ RAG Chain ready.")
+#         return rag_chain
+
+#     finally:
+#         # Clean up the downloaded file
+#         if os.path.exists(local_pdf_path):
+#             os.remove(local_pdf_path)
+
 def setup_vector_store_and_rag_chain(document_url: str):
-    """Downloads, chunks, embeds, and indexes a document, then returns the RAG chain."""
+    """Downloads, chunks, embeds, and indexes a document (PDF or DOCX), then returns the RAG chain."""
     local_pdf_path = "temp_document.pdf"
+    local_docx_path = "temp_document.docx"
     try:
-        # 1. Download and chunk the document
         print(f"Downloading document from {document_url}")
         doc_response = requests.get(str(document_url))
         doc_response.raise_for_status()
-        with open(local_pdf_path, 'wb') as f:
-            f.write(doc_response.content)
-        
-        print(f"📄 Loading document from: {local_pdf_path}")
-        loader = PyPDFLoader(local_pdf_path)
+        url_str = str(document_url)
+        if url_str.lower().endswith(".pdf"):
+            with open(local_pdf_path, 'wb') as f:
+                f.write(doc_response.content)
+            print(f"📄 Loading PDF document from: {local_pdf_path}")
+            loader = PyPDFLoader(local_pdf_path)
+        elif url_str.lower().endswith(".docx"):
+            with open(local_docx_path, 'wb') as f:
+                f.write(doc_response.content)
+            print(f"📄 Loading DOCX document from: {local_docx_path}")
+            loader = Docx2txtLoader(local_docx_path)
+        else:
+            raise ValueError("Unsupported document type. Please provide a PDF or DOCX file.")
+
         documents = loader.load()
         splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=400, length_function=len)
         chunks = splitter.split_documents(documents)
         print(f"✅ Split into {len(chunks)} chunks.")
 
-        # 2. Initialize Pinecone and clear index
+        # --- Pinecone initialization ---
         print("\n🚀 Initializing Pinecone...")
         pc = Pinecone(api_key=PINECONE_API_KEY)
-        if PINECONE_INDEX_NAME in pc.list_indexes().names():
-            print(f"🧹 Clearing existing index: {PINECONE_INDEX_NAME}...")
-            pc.Index(PINECONE_INDEX_NAME).delete(delete_all=True)
-        else:
+        index_names = pc.list_indexes().names()
+        if PINECONE_INDEX_NAME not in index_names:
             print(f"📦 Creating index: {PINECONE_INDEX_NAME}")
-            pc.create_index(name=PINECONE_INDEX_NAME, dimension=768, metric="cosine", spec=PodSpec(environment=PINECONE_ENV, pod_type="p1.x1"))
-            time.sleep(10)
+            pc.create_index(
+                name=PINECONE_INDEX_NAME,
+                dimension=768,
+                metric="cosine",
+                spec=PodSpec(environment=PINECONE_ENV, pod_type="p1.x1")
+            )
+            print("⏱ Waiting briefly for index creation...")
+            time.sleep(2)       # Lowered from 10s to 2s
+        else:
+            print(f" reusing existing index {PINECONE_INDEX_NAME}")
+            # Don't delete or recreate index!
 
-        # 3. Use the most accurate embedding model
-        embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=GOOGLE_API_KEY)
-        
-        # 4. Create and populate the vector store
+        embeddings = GoogleGenerativeAIEmbeddings(
+            model="models/text-embedding-004",
+            google_api_key=GOOGLE_API_KEY
+        )
+
         print(f"➕ Embedding and adding {len(chunks)} chunks to Pinecone...")
-        vector_store = PineconeVectorStore.from_documents(documents=chunks, embedding=embeddings, index_name=PINECONE_INDEX_NAME)
+        vector_store = PineconeVectorStore.from_documents(
+            documents=chunks,
+            embedding=embeddings,
+            index_name=PINECONE_INDEX_NAME
+        )
         print("✅ Documents embedded and indexed.")
 
-        # --- THE FIX IS HERE ---
-        # Add a short delay to allow the Pinecone index to become fully consistent
-        print("⏱️ Waiting for index to stabilize...")
-        time.sleep(5) 
-        
-        # 5. Set up the retriever
+        # If you still observe sync issues, use at most 1s sleep.
+        # time.sleep(1) 
+
         retriever = vector_store.as_retriever(search_kwargs={"k": 5})
         print(f"🔍 Retriever initialized.")
 
-        # 6. Set up the LLM and RAG chain
-        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.3, google_api_key=GOOGLE_API_KEY)
-        prompt = ChatPromptTemplate.from_template("""You are a precise, fact-based Question-Answering bot. Your answers must be **concise and directly extracted** from the provided context. 
-Do not add any introductory or concluding conversational phrases.
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-1.5-flash-latest",
+            temperature=0.3,
+            google_api_key=GOOGLE_API_KEY
+        )
+        prompt = ChatPromptTemplate.from_template(
+            """You are a helpful assistant. Use the following context to answer the user's question. Give the answer anyhow from the provided document. If the answer isn't in the context, say you cannot find the answer in the document.
 Context: {context}
 Question: {question}
-Answer:""")
-        rag_chain = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever, chain_type_kwargs={"prompt": prompt})
+Answer:"""
+        )
+        rag_chain = RetrievalQA.from_chain_type(
+            llm=llm,
+            chain_type="stuff",
+            retriever=retriever,
+            chain_type_kwargs={"prompt": prompt}
+        )
         print("✅ RAG Chain ready.")
         return rag_chain
 
     finally:
-        # Clean up the downloaded file
+        # Clean up both files if they exist
         if os.path.exists(local_pdf_path):
             os.remove(local_pdf_path)
+        if os.path.exists(local_docx_path):
+            os.remove(local_docx_path)
 
 # --- API Endpoint ---
 @app.post("/hackrx/run", response_model=RAGResponse, tags=["RAG Pipeline"])
