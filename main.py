@@ -95,7 +95,8 @@ def setup_vector_store_and_rag_chain(document_url: str):
         llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.3, google_api_key=GOOGLE_API_KEY)
         prompt = ChatPromptTemplate.from_template("""
 You are a clause-extraction AI. Your sole task is to find the single sentence or phrase in the context that directly answers the question.
-- Your response must be a single line.
+- Your response must not be too long.
+- Start the sentence with a "Yes" (or) "no" for a decisional question. 
 - Do not add any introductory words like "According to the document...".
 - Quote the answer directly from the text whenever possible.
 
