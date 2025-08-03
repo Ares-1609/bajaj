@@ -8,6 +8,9 @@ from typing import List, Optional
 from dotenv import load_dotenv
 
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
+from urllib.parse import urlparse, unquote
+
+
 
 
 # LangChain and Pinecone
@@ -112,17 +115,23 @@ def setup_vector_store_and_rag_chain(document_url: str):
         print(f"Downloading document from {document_url}")
         doc_response = requests.get(str(document_url))
         doc_response.raise_for_status()
-        url_str = str(document_url)
-        if url_str.lower().endswith(".pdf"):
+
+        # Parse the URL path to get the file extension correctly
+        parsed_url = urlparse(str(document_url))
+        file_path = unquote(parsed_url.path).lower()
+
+        if file_path.endswith(".pdf"):
             with open(local_pdf_path, 'wb') as f:
                 f.write(doc_response.content)
             print(f"📄 Loading PDF document from: {local_pdf_path}")
             loader = PyPDFLoader(local_pdf_path)
-        elif url_str.lower().endswith(".docx"):
+
+        elif file_path.endswith(".docx"):
             with open(local_docx_path, 'wb') as f:
                 f.write(doc_response.content)
             print(f"📄 Loading DOCX document from: {local_docx_path}")
             loader = Docx2txtLoader(local_docx_path)
+
         else:
             raise ValueError("Unsupported document type. Please provide a PDF or DOCX file.")
 
@@ -144,9 +153,9 @@ def setup_vector_store_and_rag_chain(document_url: str):
                 spec=PodSpec(environment=PINECONE_ENV, pod_type="p1.x1")
             )
             print("⏱ Waiting briefly for index creation...")
-            time.sleep(2)       # Lowered from 10s to 2s
+            time.sleep(2)  # Reduced from 10s to 2s
         else:
-            print(f" reusing existing index {PINECONE_INDEX_NAME}")
+            print(f"Reusing existing index {PINECONE_INDEX_NAME}")
             # Don't delete or recreate index!
 
         embeddings = GoogleGenerativeAIEmbeddings(
@@ -162,8 +171,8 @@ def setup_vector_store_and_rag_chain(document_url: str):
         )
         print("✅ Documents embedded and indexed.")
 
-        # If you still observe sync issues, use at most 1s sleep.
-        # time.sleep(1) 
+        # Optionally wait briefly if you hit sync issues
+        # time.sleep(1)
 
         retriever = vector_store.as_retriever(search_kwargs={"k": 5})
         print(f"🔍 Retriever initialized.")
@@ -189,7 +198,7 @@ Answer:"""
         return rag_chain
 
     finally:
-        # Clean up both files if they exist
+        # Clean up both temporary files if they exist
         if os.path.exists(local_pdf_path):
             os.remove(local_pdf_path)
         if os.path.exists(local_docx_path):
