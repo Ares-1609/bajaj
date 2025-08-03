@@ -76,6 +76,11 @@ def setup_vector_store_and_rag_chain(document_url: str):
         vector_store = PineconeVectorStore.from_documents(documents=chunks, embedding=embeddings, index_name=PINECONE_INDEX_NAME)
         print("✅ Documents embedded and indexed.")
 
+        # --- THE FIX IS HERE ---
+        # Add a short delay to allow the Pinecone index to become fully consistent
+        print("⏱️ Waiting for index to stabilize...")
+        time.sleep(5) 
+        
         # 5. Set up the retriever
         retriever = vector_store.as_retriever(search_kwargs={"k": 5})
         print(f"🔍 Retriever initialized.")
