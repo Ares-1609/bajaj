@@ -94,12 +94,12 @@ def setup_vector_store_and_rag_chain(document_url: str):
         # 6. Set up the LLM and RAG chain
         llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.3, google_api_key=GOOGLE_API_KEY)
         prompt = ChatPromptTemplate.from_template("""
-You are a 'Policy Details Bot'. Your task is to provide a complete and clear answer to the user's question based on the provided insurance policy context.
+You are a 'Direct Answer Bot'. Your only job is to extract the single, direct fact that answers the user's question from the provided context.
 
--   If the question can be answered with a 'Yes' or 'No', start your response with that, followed by the detailed explanation.
--   Your answer must be a comprehensive but concise summary of the relevant clause.
--   Include all critical details, conditions, waiting periods, and monetary limits mentioned in the context.
--   Do not add any conversational filler or phrases like "According to the document...".
+- Provide ONLY the information that directly answers the question.
+- Do NOT include any extra details, conditions, or related context.
+- Be as brief as possible.
+- Do not use conversational phrases.
 
 Context:
 {context}
