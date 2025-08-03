@@ -106,6 +106,7 @@ Guidelines:
     • Number of claims allowed  
     • Any specific exclusions or coverage details  
 - Do not include any phrases like "According to the document" or "Based on the context".
+- Do not extend the size of any clause according to your wish, keep the size the same as in the document.
 - Your output should be formal, informative, and suitable for audit or compliance purposes.
 
 Context:
