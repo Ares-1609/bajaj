@@ -75,7 +75,7 @@ def process_document_and_questions(document_url: str, questions: list):
         def setup_rag_chain_gemini(retriever, llm_model_name="gemini-1.5-flash-latest"):
             print(f"\n🤖 Setting up Gemini RAG Chain with model: {llm_model_name}")
             llm = ChatGoogleGenerativeAI(model=llm_model_name, temperature=0.3, google_api_key=GOOGLE_API_KEY)
-            prompt = ChatPromptTemplate.from_template("""You are a helpful assistant. Use the following context to answer the user's question. Give the answer anyhow from the provided document. If the answer isn't in the context, say you cannot find the answer in the document.
+            prompt = ChatPromptTemplate.from_template("""You are a helpful assistant. Use the following context to answer the user's question. Give the answer anyhow from the provided document.
 Context: {context}
 Question: {question}
 Answer:""")
