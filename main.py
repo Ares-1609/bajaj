@@ -87,7 +87,8 @@ def setup_vector_store_and_rag_chain(document_url: str):
 
         # 6. Set up the LLM and RAG chain
         llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.3, google_api_key=GOOGLE_API_KEY)
-        prompt = ChatPromptTemplate.from_template("""You are a helpful assistant. Use the following context to answer the user's question. Give the answer anyhow from the provided document. If the answer isn't in the context, say you cannot find the answer in the document.
+        prompt = ChatPromptTemplate.from_template("""You are a precise, fact-based Question-Answering bot. Your answers must be **concise and directly extracted** from the provided context. 
+Do not add any introductory or concluding conversational phrases.
 Context: {context}
 Question: {question}
 Answer:""")
