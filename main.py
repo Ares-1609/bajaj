@@ -94,11 +94,12 @@ def setup_vector_store_and_rag_chain(document_url: str):
         # 6. Set up the LLM and RAG chain
         llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.3, google_api_key=GOOGLE_API_KEY)
         prompt = ChatPromptTemplate.from_template("""
-You are a clause-extraction AI. Your sole task is to find the single sentence or phrase in the context that directly answers the question.
-- Your response must not be too long.
-- Start the sentence with a "Yes" (or) "no" for a decisional question. 
-- Do not add any introductory words like "According to the document...".
-- Quote the answer directly from the text whenever possible.
+You are a 'Policy Details Bot'. Your task is to provide a complete and clear answer to the user's question based on the provided insurance policy context.
+
+-   If the question can be answered with a 'Yes' or 'No', start your response with that, followed by the detailed explanation.
+-   Your answer must be a comprehensive but concise summary of the relevant clause.
+-   Include all critical details, conditions, waiting periods, and monetary limits mentioned in the context.
+-   Do not add any conversational filler or phrases like "According to the document...".
 
 Context:
 {context}
