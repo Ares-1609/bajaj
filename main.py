@@ -44,7 +44,7 @@ class RAGRequest(BaseModel):
 class RAGResponse(BaseModel):
     answers: List[str]
 
---- Core Processing Logic ---
+#--- Core Processing Logic ---
 def setup_vector_store_and_rag_chain(document_url: str):
     """Downloads, chunks, embeds, and indexes a document, then returns the RAG chain."""
     local_pdf_path = "temp_document.pdf"
