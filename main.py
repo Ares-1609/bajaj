@@ -87,7 +87,7 @@ async def run_rag_pipeline(request: RAGRequest, authorization: Optional[str] = H
                 PineconeVectorStore.from_documents(documents=chunks, embedding=embeddings, index_name=PINECONE_INDEX_NAME, namespace=namespace_id)
                 print("✅ Indexing complete.")
             finally:
-                if os.exists(local_pdf_path): os.remove(local_pdf_path)
+                if os.path.exists(local_pdf_path): os.remove(local_pdf_path)
         else:
             print(f"✅ Document found in cache for namespace: {namespace_id[:10]}. Skipping indexing.")
 
