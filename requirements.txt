@@ -8,3 +8,4 @@ pinecone-client
 pypdf
 python-dotenv
 requests
+docx2txt
