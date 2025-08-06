@@ -4,8 +4,6 @@ import requests
 import uvicorn
 import asyncio
 import hashlib
-import json
-import re
 from fastapi import FastAPI, HTTPException, Header
 from pydantic import BaseModel, HttpUrl
 from typing import List, Optional
@@ -16,7 +14,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain.chains import RetrievalQA
-from langchain.prompts import ChatPromptTemplate, PromptTemplate
+from langchain.prompts import ChatPromptTemplate
 from langchain_pinecone import PineconeVectorStore
 from pinecone import Pinecone, PodSpec
 
@@ -27,166 +25,121 @@ PINECONE_ENV = os.getenv("PINECONE_ENV")
 PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-# --- FastAPI Initialization ---
+# --- FastAPI App Initialization ---
 app = FastAPI(
-    title="Intelligent Document Q&A API",
-    description="Handles structured and unstructured queries on policy documents using LLM + RAG.",
-    version="3.2.0"
+    title="Optimized Document Analysis API",
+    description="Uses a single endpoint with a caching mechanism to provide fast, reasoned answers from documents.",
+    version="4.1.0"
 )
 
-# --- Pydantic Models ---
+# --- Pydantic Models for API Data Validation ---
 class RAGRequest(BaseModel):
     documents: HttpUrl
     questions: List[str]
 
-class Answer(BaseModel):
-    decision: str
-    amount: Optional[str] = None
-    justification: str
-    parsed_query: Optional[dict] = None
-
 class RAGResponse(BaseModel):
-    answers: List[Answer]
+    answers: List[str]
 
-# --- Utility: Determine if query is structured ---
-def is_structured_query(query: str) -> bool:
-    pattern = r'\b\d{1,3}[ ]?(years?|yrs?|yo|year[- ]?old)?\b|male|female|surgery|policy|months?|procedure|location|in\s+\w+'
-    return re.search(pattern, query.lower()) is not None
-
-# --- Utility: Parse free-form query using LLM ---
-async def parse_input_query(query: str, llm) -> dict:
-    prompt = PromptTemplate.from_template("""
-You are a smart insurance query parser. Extract structured information from the text.
-
-Return JSON with these fields:
-- age (integer or null)
-- gender (male/female/other/unknown)
-- procedure (string or null)
-- location (string or null)
-- policy_duration (string or null)
-
-If a field is missing, return null.
-
-Query: "{query}"
-
-Respond ONLY in JSON.
-""")
-    chain = prompt | llm
-    result = await chain.ainvoke({"query": query})
-    try:
-        return json.loads(result)
-    except:
-        return {
-            "error": "Unable to parse query",
-            "raw_response": result
-        }
-
-# --- Main Endpoint ---
+# --- API Endpoint ---
 @app.post("/hackrx/run", response_model=RAGResponse, tags=["RAG Pipeline"])
 async def run_rag_pipeline(request: RAGRequest, authorization: Optional[str] = Header(None)):
+    """
+    Receives a document URL and questions. It checks if the document is cached;
+    if not, it indexes it. Then, it answers the questions in parallel.
+    """
     if not authorization:
         raise HTTPException(status_code=401, detail="Authorization header is missing")
 
     document_url = str(request.documents)
+    # Create a unique, deterministic ID for the document URL to use as a namespace
     namespace_id = hashlib.sha256(document_url.encode()).hexdigest()
 
     try:
         pc = Pinecone(api_key=PINECONE_API_KEY)
-
+        
+        # Create the index if it doesn't already exist
         if PINECONE_INDEX_NAME not in pc.list_indexes().names():
             print(f"Index not found. Creating index: {PINECONE_INDEX_NAME}")
             pc.create_index(name=PINECONE_INDEX_NAME, dimension=768, metric="cosine", spec=PodSpec(environment=PINECONE_ENV))
-            time.sleep(10)
-
+            time.sleep(10) # Wait for index to be ready
+        
         index = pc.Index(PINECONE_INDEX_NAME)
         embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=GOOGLE_API_KEY)
 
+        # Check if the document is already cached in the namespace
         query_res = index.query(vector=[0]*768, top_k=1, namespace=namespace_id)
-
+        
         if not query_res['matches']:
-            print(f"📂 No cached index found. Downloading and processing document.")
+            print(f"🚀 Document not found in cache. Starting one-time indexing for namespace: {namespace_id[:10]}...")
             local_file_path = "temp_document"
             try:
+                # Download, chunk, and index the document into the specific namespace
                 doc_response = requests.get(document_url)
                 doc_response.raise_for_status()
-                with open(local_file_path, 'wb') as f:
-                    f.write(doc_response.content)
+                with open(local_file_path, 'wb') as f: f.write(doc_response.content)
 
                 if document_url.lower().endswith('.pdf'):
                     loader = PyPDFLoader(local_file_path)
                 elif document_url.lower().endswith('.docx'):
                     loader = Docx2txtLoader(local_file_path)
                 else:
-                    raise HTTPException(status_code=415, detail="Unsupported file type. Provide .pdf or .docx URL.")
-
+                    raise HTTPException(status_code=415, detail="Unsupported file type. Please provide a .pdf or .docx URL.")
+                
                 documents = loader.load()
                 splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=400, length_function=len)
                 chunks = splitter.split_documents(documents)
-
-                print(f"📌 Indexing {len(chunks)} document chunks...")
-                PineconeVectorStore.from_documents(
-                    documents=chunks,
-                    embedding=embeddings,
-                    index_name=PINECONE_INDEX_NAME,
-                    namespace=namespace_id
-                )
+                
+                print(f"➕ Embedding and adding {len(chunks)} chunks to Pinecone namespace...")
+                PineconeVectorStore.from_documents(documents=chunks, embedding=embeddings, index_name=PINECONE_INDEX_NAME, namespace=namespace_id)
+                print("✅ Indexing complete.")
             finally:
-                if os.path.exists(local_file_path):
-                    os.remove(local_file_path)
+                if os.path.exists(local_file_path): os.remove(local_file_path)
         else:
-            print(f"✅ Document found in cache. Skipping re-indexing.")
+            print(f"✅ Document found in cache for namespace: {namespace_id[:10]}. Skipping indexing.")
 
-        # Retrieval Setup
+        # Now, perform the fast querying using the correct namespace
         vector_store = PineconeVectorStore.from_existing_index(index_name=PINECONE_INDEX_NAME, embedding=embeddings, namespace=namespace_id)
-        retriever = vector_store.as_retriever(search_kwargs={"k": 5})
-        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.3, google_api_key=GOOGLE_API_KEY)
-
+        retriever = vector_store.as_retriever(search_kwargs={"k": 10})
+        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.1, google_api_key=GOOGLE_API_KEY)
+        
+        # The generic, domain-agnostic prompt for evaluative reasoning
         prompt = ChatPromptTemplate.from_template("""
-You are a helpful assistant. Use the following context from the insurance document to answer the question.
+You are a 'Document Analysis Bot'. Your task is to evaluate a user's query against the provided reference text and provide a direct, reasoned answer.
 
-Context:
+**Reference Text (Context):**
 {context}
 
-Question:
+**User's Query (Question):**
 {question}
 
-Answer:""")
+**Your Task:**
+1.  Analyze the user's query to understand their situation or question.
+2.  Carefully evaluate the provided reference text to determine if the query complies with the rules, facts, or clauses within.
+3.  If the query can be answered with a 'Yes' or 'No', start your response with that decision.
+4.  Follow the decision with a concise justification based on the most relevant rule or fact from the text.
 
-        rag_chain = RetrievalQA.from_chain_type(
-            llm=llm,
-            chain_type="stuff",
-            retriever=retriever,
-            chain_type_kwargs={"prompt": prompt}
-        )
+**Answer:**
+""")
+        
+        rag_chain = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever, chain_type_kwargs={"prompt": prompt})
 
-        # Process Questions
-        answers = []
-        for user_question in request.questions:
-            if is_structured_query(user_question):
-                print(f"🧠 Structured query detected.")
-                structured_info = await parse_input_query(user_question, llm)
-            else:
-                structured_info = None
-                print(f"📄 Fact-based query detected.")
+        # Process questions in parallel for speed
+        async def get_answer(question: str):
+            print(f"🤔 Evaluating query: {question}")
+            response = await rag_chain.ainvoke({"query": question})
+            return response["result"]
 
-            response = await rag_chain.ainvoke({"query": user_question})
-            rag_answer = response["result"]
-
-            decision = "approved" if "covered" in rag_answer.lower() else "refer_to_document"
-
-            answers.append({
-                "decision": decision,
-                "amount": None,
-                "justification": rag_answer,
-                "parsed_query": structured_info
-            })
-
+        tasks = [get_answer(q) for q in request.questions]
+        answers = await asyncio.gather(*tasks)
+        
         return RAGResponse(answers=answers)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
 
-# --- Health Check ---
 @app.get("/", tags=["Health Check"])
 async def read_root():
     return {"status": "API is running"}
+
+# To run this file locally for testing:
+# uvicorn main:app --reload
